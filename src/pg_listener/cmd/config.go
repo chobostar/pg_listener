@@ -22,6 +22,8 @@ type Config struct {
 	Chunks     string `split_words:"true"`
 
 	KafkaHosts string `split_words:"true" required:"true"`
+
+	Profile string `split_words:"true" required:"true"`
 }
 
 // NewConfig loads ENV variables to Config structure

@@ -35,6 +35,8 @@ type PgListener struct {
 	chunks     string
 
 	lastWal uint64
+
+	buffer []byte
 }
 
 //InitListener initiates not started listener with given resources and configuration
@@ -53,6 +55,7 @@ func InitListener(log logrus.FieldLogger, producer ProducerClient, cfg *Config) 
 		lsn:        cfg.Lsn,
 		tableNames: cfg.TableNames,
 		chunks:     cfg.Chunks,
+		buffer:     []byte{},
 	}
 
 	if pgListener.slot == "" {
@@ -95,7 +98,6 @@ func (l *PgListener) StartToListen() error {
 	}
 
 	err = conn.StartReplication(l.slot, lsnAsInt, defaultPostgresTimeline, outputParams...)
-
 	if err == nil {
 		l.log.Info("now listening...")
 		l.listen(conn)
@@ -107,15 +109,17 @@ func (l *PgListener) StartToListen() error {
 //listen is main infinite process for handle this replication slot
 func (l *PgListener) listen(rc *pgx.ReplicationConn) {
 	for {
-		r, err := rc.WaitForReplicationMessage(context.TODO())
+		r, err := rc.WaitForReplicationMessage(context.Background())
 		if err != nil {
 			l.log.Fatal(err)
 		}
 
-		if r.ServerHeartbeat != nil {
-			l.handleHeartbeat(rc, r.ServerHeartbeat.ServerWalEnd)
-		} else if r.WalMessage != nil {
-			l.handleMessage(rc, r.WalMessage.WalData, r.WalMessage.WalStart, r.WalMessage.ServerWalEnd)
+		if r != nil {
+			if r.ServerHeartbeat != nil {
+				l.handleHeartbeat(rc, r.ServerHeartbeat.ServerWalEnd)
+			} else if r.WalMessage != nil {
+				l.handleMessage(rc, r.WalMessage.WalData, r.WalMessage.WalStart, r.WalMessage.ServerWalEnd)
+			}
 		}
 	}
 }
@@ -136,15 +140,26 @@ func (l *PgListener) handleMessage(rc *pgx.ReplicationConn, walData []byte, walS
 	l.log.Debug("wal message received: ", walStart, " ", walEnd)
 
 	l.lastWal = walStart
+
+	//buffering all input bytes
+	l.buffer = append(l.buffer, walData...)
 	var change model.Wal2JsonMessage
-	if err := json.Unmarshal(walData, &change); err != nil {
-		l.log.Fatal(err)
+	//trying to deserialize to JSON
+	if err := json.Unmarshal(l.buffer, &change); err == nil {
+		messages := l.getAsMessages(change)
+
+		l.produceMessage(messages)
+
+		l.buffer = []byte{}
 	}
 
-	messages := l.getAsMessages(change)
+	l.sendStandBy(rc)
+}
 
-	if len(messages) > 0 {
-		for _, message := range messages {
+//produceMessage iterates over parsed messages and publish it to Kafka
+func (l *PgListener) produceMessage(messages *[]model.Message) {
+	if len(*messages) > 0 {
+		for _, message := range *messages {
 			l.log.Debug(fmt.Sprintf("sending message %+v", message))
 
 			for {
@@ -157,8 +172,6 @@ func (l *PgListener) handleMessage(rc *pgx.ReplicationConn, walData []byte, walS
 			}
 		}
 	}
-
-	l.sendStandBy(rc)
 }
 
 func (l *PgListener) sendStandBy(rc *pgx.ReplicationConn) error {
@@ -172,11 +185,11 @@ func (l *PgListener) sendStandBy(rc *pgx.ReplicationConn) error {
 }
 
 //getAsMessages parses topic and value from Wal2Json data
-func (l *PgListener) getAsMessages(change model.Wal2JsonMessage) []model.Message {
+func (l *PgListener) getAsMessages(change model.Wal2JsonMessage) *[]model.Message {
 	var messages []model.Message
 
 	if len(change.Change) == 0 {
-		return messages
+		return &messages
 	}
 
 	for _, item := range change.Change {
@@ -195,7 +208,7 @@ func (l *PgListener) getAsMessages(change model.Wal2JsonMessage) []model.Message
 		}
 	}
 
-	return messages
+	return &messages
 }
 
 func (l *PgListener) getParsedValue(input interface{}) string {

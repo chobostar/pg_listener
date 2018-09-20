@@ -16,6 +16,7 @@ import (
 //PGLSN_SLOT=kirill_slot
 //PGLSN_KAFKA_HOSTS=kafka1.opentech.local:9092,kafka2.opentech.local:9092,kafka3.opentech.local:9092
 //PGLSN_CHUNKS=1
+//PGLSN_PROFILE=staging
 // go run src/pg_listener/pg_listener.go
 func main() {
 	isDebug := flag.Bool("debug", false, "debug mode for more log info")
@@ -32,7 +33,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	producer, err := cmd.NewProducer(strings.Split(cfg.KafkaHosts, ","))
+	producer, err := cmd.NewProducer(strings.Split(cfg.KafkaHosts, ","), cfg.Profile)
 	if err != nil {
 		log.Fatal(err)
 	}
