@@ -1,8 +1,7 @@
-# Приложение для доставки сообщений из PostgreSQL в Apache Kafka через логическое декодирование
 # Go application to capture inserts to PostgreSQL table and produce events to Apache Kafka using replication slot and WAL
 
-Соединяется к слоту репликации и слушает INSERT-ы в указанные таблицы, откуда копирует значение колонок topic и payload, потом отправляет это сообщение в Kafka.
-Пример таблицы для прослушивания:
+It connects to the replication slot and listens to INSERTs into the specified tables, from where it copies the value of the topic and payload columns, then sends this message to Kafka.
+Listening table example:
 ```
 CREATE TABLE queue.events (
     id bigserial primary key,
@@ -12,38 +11,60 @@ CREATE TABLE queue.events (
 );
 ```
 
-#### Установка
-* требует установленный https://github.com/eulerto/wal2json на сервере PostgreSQL
-* создать слот репликации на PostgreSQL ```SELECT pg_create_logical_replication_slot('my_slot','wal2json')```
-* установить Go 1.9 или выше
-* установить менеджер пакетов https://github.com/golang/dep (например: ```$ GOPATH="/home/user/go"```; ```$ go get -u github.com/golang/dep/cmd/dep```)
-* ```git clone %этот_репозиторий%```
-* ```cd pg_listener```
-* ```env GOPATH="%полный_путь_до_папки_репозитория%" go build pg_listener```
-* ИЛИ ```GOPATH="%полный_путь_до_папки_репозитория%" CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo pg_listener``` для сборки статического бинарника
+#### Installing
+* it requires https://github.com/eulerto/wal2json 
+* create slot in PostgreSQL ```SELECT pg_create_logical_replication_slot('my_slot','wal2json')```
+* Go 1.13 or newer
 
-Получаем исполняемый файл pg_listener. Запускать используя в качестве параметров переменные среды:
 ```
-env PGLSN_DB_HOST=localhost PGLSN_DB_PORT=5432 PGLSN_DB_USER=postgres PGLSN_DB_PASS=postgres =demo PGLSN_TABLE_NAMES=queue.events PGLSN_SLOT=my_slot
-PGLSN_KAFKA_HOSTS=kafka1.local:9092,kafka2.local:9092,kafka3.local:9092 PGLSN_CHUNKS=1 pg_listener
+make build
 ```
 
-#### Конфигурация
-Реквизиты PostgreSQL: <br/>
-PGLSN_DB_HOST, PGLSN_DB_PORT, PGLSN_DB_NAME, PGLSN_DB_USER, PGLSN_DB_PASS<br/>
+#### Example run
+```
+make up
+make init
+make build
+make demo
+```
 
-Опции wal2json (https://github.com/eulerto/wal2json):<br/>
-PGLSN_TABLE_NAMES - содержимое опции 'add-tables' - наименование таблиц через "," INSERT-ы на которых, передаются в Kafka<br/>
-PGLSN_CHUNKS - содержимое опции 'write-in-chunks', если "1", то пакетные изменения получает, как построчные<br/>
+make insert to postgres:
+```
+$ echo "insert into queue.events(topic, payload) values('demo_topic', '{\"id\": \"file\"}'::json);" | docker-compose exec -T postgres psql -U postgres
 
-Опции репликации postgres (https://www.postgresql.org/docs/10/static/protocol-replication.html):<br/>
-PGLSN_SLOT - слот репликации откуда получать изменения<br/>
-PGLSN_LSN - в виде строки XXX/XXX, начиная с этого WAL начать репликацию. По-умолчанию пустая значение, которое соответствует 0/0.<br/>
+INSERT 0 1
+```
+see topics list:
+```
+$ docker-compose exec -T broker /bin/kafka-topics --bootstrap-server=localhost:9092 --list
 
-Реквизиты Apache Kafka:<br/>
-PGLSN_KAFKA_HOSTS - строки hostname:port через запятую слитно<br/>  
+demo_topic
+```
+read content:
+```
+$ docker-compose exec -T broker /bin/kafka-console-consumer --bootstrap-server=localhost:9092 --topic demo_topic --from-beginning 
 
+{"id": "file"}
+```
 
-#### Примечание
-Если не использовать опцию ```write-in-chunks``` есть риск, что большие изменения не смогут отреплицироваться, даже если они не относятся к отслеживаемой таблице (https://github.com/eulerto/wal2json/issues/46)
+#### Configure
+PostgreSQL connection:
+- PGLSN_DB_HOST
+- PGLSN_DB_PORT
+- PGLSN_DB_NAME
+- PGLSN_DB_USER
+- PGLSN_DB_PASS
 
+[wal2json](https://github.com/eulerto/wal2json) options (see also https://github.com/eulerto/wal2json#parameters):
+- PGLSN_TABLE_NAMES is `add-tables` - comma "," separated table names which INSERTs are produced to Kafka
+- PGLSN_CHUNKS is `write-in-chunks`, if "1", write after every change instead of every changeset
+
+Postgres [replication options](https://www.postgresql.org/docs/10/static/protocol-replication.html):
+- PGLSN_SLOT - replication slot name where to connect
+- PGLSN_LSN - Instructs server to start streaming WAL, starting at WAL location XXX/XXX. 0/0 by default.
+
+Apache Kafka connection:
+- PGLSN_KAFKA_HOSTS - comma separated hostname:port  
+
+#### Сaution
+If you don't use ```write-in-chunks``` option, then `ERROR: invalid memory alloc request size` issue is possible - https://github.com/eulerto/wal2json/issues/46

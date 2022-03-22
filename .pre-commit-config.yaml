@@ -1,9 +1,0 @@
-- repo: git://github.com/dnephin/pre-commit-golang
-  sha: HEAD
-  hooks:
-    - id: go-fmt
-      exclude: '^src/pg_listener/vendor/'
-    - id: go-vet
-      exclude: '^src/pg_listener/vendor/'
-    - id: go-lint
-      exclude: '^src/pg_listener/vendor/'
