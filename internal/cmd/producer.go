@@ -26,9 +26,9 @@ type KafkaProducer struct {
 func NewProducer(hosts []string) (ProducerClient, error) {
 	config := sarama.NewConfig()
 	config.Producer.Retry.Max = maxProducerRetry
-	config.Producer.RequiredAcks = sarama.WaitForLocal
+	config.Producer.RequiredAcks = sarama.WaitForAll
 	config.Producer.Return.Successes = true
-	config.Version = sarama.V0_10_0_0
+	config.Version = sarama.V3_1_0_0
 
 	producer, err := sarama.NewSyncProducer(hosts, config)
 

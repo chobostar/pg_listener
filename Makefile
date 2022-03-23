@@ -15,6 +15,10 @@ init:
 build:
 	go build -o ./bin/pg_listener ./cmd/pg_listener.go
 
+.PHONY: test
+test:
+	go test -v ./...
+
 .PHONY: demo
 demo:
 	PGLSN_DB_HOST=localhost \

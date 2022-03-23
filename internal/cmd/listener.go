@@ -15,6 +15,9 @@ const (
 	defaultPostgresTimeline = -1
 	columnNameForTopic      = "topic"
 	columnNameForPayload    = "payload"
+)
+
+var (
 	sleepSecondBetweenRetry = 3
 )
 
@@ -167,7 +170,7 @@ func (l *PgListener) produceMessage(messages *[]model.Message) {
 			for {
 				if err := l.producer.Publish(message.Topic, message.Value); err != nil {
 					l.log.Error("Error while producing message: ", err)
-					time.Sleep(sleepSecondBetweenRetry * time.Second)
+					time.Sleep(time.Duration(sleepSecondBetweenRetry) * time.Second)
 					continue
 				}
 				break
