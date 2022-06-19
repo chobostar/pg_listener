@@ -42,6 +42,7 @@ func (p *TestProducerRetries) Publish(topic string, value string) error {
 
 func TestProduceMessage(t *testing.T) {
 	mockProducer := &TestProducer{}
+	testMetrics := NewMetrics()
 
 	testLogger, hook := test.NewNullLogger()
 	testLogger.SetLevel(logrus.DebugLevel)
@@ -49,6 +50,7 @@ func TestProduceMessage(t *testing.T) {
 	mockListener := &PgListener{
 		log:      testLogger,
 		producer: mockProducer,
+		metrics:  testMetrics,
 	}
 
 	var messages []model.Message
@@ -62,10 +64,14 @@ func TestProduceMessage(t *testing.T) {
 	assert.Equal(t, "test_topic", mockProducer.lastTopic)
 	assert.Equal(t, "hello value", mockProducer.lastValue)
 	assert.Equal(t, "sending message {Topic:test_topic Value:hello value}", hook.LastEntry().Message)
+
+	assert.Equal(t, uint64(1), testMetrics.totalMessages)
+	assert.Equal(t, uint64(0), testMetrics.totalErrors)
 }
 
 func TestProduceMessageRetry(t *testing.T) {
 	mockProducer := &TestProducerRetries{}
+	testMetrics := NewMetrics()
 
 	testLogger, hook := test.NewNullLogger()
 	testLogger.SetLevel(logrus.DebugLevel)
@@ -73,6 +79,7 @@ func TestProduceMessageRetry(t *testing.T) {
 	mockListener := &PgListener{
 		log:      testLogger,
 		producer: mockProducer,
+		metrics:  testMetrics,
 	}
 
 	var messages []model.Message
@@ -88,10 +95,14 @@ func TestProduceMessageRetry(t *testing.T) {
 	assert.Equal(t, "hello value", mockProducer.lastValue)
 	assert.Equal(t, 1, mockProducer.retryCount)
 	assert.Equal(t, "Error while producing message: mock error", hook.LastEntry().Message)
+
+	assert.Equal(t, uint64(1), testMetrics.totalMessages)
+	assert.Equal(t, uint64(1), testMetrics.totalErrors)
 }
 
 func TestGetAsMessages(t *testing.T) {
-	mockListener := &PgListener{}
+	testMetrics := NewMetrics()
+	mockListener := &PgListener{metrics: testMetrics}
 
 	var values []interface{}
 	values = append(values, 3)

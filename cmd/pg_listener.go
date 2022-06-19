@@ -37,7 +37,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	listener := cmd.InitListener(log, producer, cfg)
+	internalMetrics := cmd.NewMetrics()
+
+	listener := cmd.InitListener(log, producer, cfg, internalMetrics)
 	if err = listener.StartToListen(); err != nil {
 		log.Fatal(err)
 	}

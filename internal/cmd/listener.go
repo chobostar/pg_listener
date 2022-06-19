@@ -40,10 +40,12 @@ type PgListener struct {
 	lastWal uint64
 
 	buffer []byte
+
+	metrics *Metrics
 }
 
 //InitListener initiates not started listener with given resources and configuration
-func InitListener(log logrus.FieldLogger, producer ProducerClient, cfg *Config) *PgListener {
+func InitListener(log logrus.FieldLogger, producer ProducerClient, cfg *Config, metrics *Metrics) *PgListener {
 	port, _ := strconv.ParseUint(cfg.DbPort, 10, 16)
 
 	pgListener := &PgListener{
@@ -59,6 +61,7 @@ func InitListener(log logrus.FieldLogger, producer ProducerClient, cfg *Config) 
 		tableNames: cfg.TableNames,
 		chunks:     cfg.Chunks,
 		buffer:     []byte{},
+		metrics:    metrics,
 	}
 
 	if pgListener.slot == "" {
@@ -100,6 +103,15 @@ func (l *PgListener) StartToListen() error {
 		outputParams = append(outputParams, fmt.Sprintf("\"write-in-chunks\" '%s'", l.chunks))
 	}
 
+	//start exporter
+	go func() {
+		l.log.Info("starting exporter of default port...")
+		err := runMetricsExporter(l.metrics)
+		if err != nil {
+			l.log.Fatal("Unable to start exporter", err)
+		}
+	}()
+
 	err = conn.StartReplication(l.slot, lsnAsInt, defaultPostgresTimeline, outputParams...)
 	if err == nil {
 		l.log.Info("now listening...")
@@ -132,9 +144,12 @@ func (l *PgListener) handleHeartbeat(rc *pgx.ReplicationConn, walEnd uint64) {
 	l.log.Debug("server heartbeat received: ", walEnd)
 
 	l.lastWal = walEnd
+	l.metrics.totalHeartbeats++
+	l.metrics.lastCommittedWal = l.lastWal
 
 	if err := l.sendStandBy(rc); err != nil {
 		l.log.Error(err)
+		l.metrics.totalErrors++
 	}
 }
 
@@ -143,9 +158,12 @@ func (l *PgListener) handleMessage(rc *pgx.ReplicationConn, walData []byte, walS
 	l.log.Debug("wal message received: ", walStart, " ", walEnd)
 
 	l.lastWal = walStart
+	l.metrics.lastCommittedWal = l.lastWal
 
 	//buffering all input bytes
 	l.buffer = append(l.buffer, walData...)
+	l.metrics.bufferSize = len(l.buffer)
+
 	var change model.Wal2JsonMessage
 	//trying to deserialize to JSON
 	if err := json.Unmarshal(l.buffer, &change); err == nil {
@@ -154,6 +172,7 @@ func (l *PgListener) handleMessage(rc *pgx.ReplicationConn, walData []byte, walS
 		l.produceMessage(messages)
 
 		l.buffer = []byte{}
+		l.metrics.bufferSize = 0
 	}
 
 	if err := l.sendStandBy(rc); err != nil {
@@ -170,11 +189,13 @@ func (l *PgListener) produceMessage(messages *[]model.Message) {
 			for {
 				if err := l.producer.Publish(message.Topic, message.Value); err != nil {
 					l.log.Error("Error while producing message: ", err)
+					l.metrics.totalErrors++
 					time.Sleep(time.Duration(sleepSecondBetweenRetry) * time.Second)
 					continue
 				}
 				break
 			}
+			l.metrics.totalMessages++
 		}
 	}
 }
