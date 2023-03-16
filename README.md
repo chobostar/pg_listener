@@ -46,6 +46,13 @@ $ docker-compose exec -T broker /bin/kafka-console-consumer --bootstrap-server=l
 
 {"id": "file"}
 ```
+check metrics:
+```bash
+$ curl -s http://localhost:9938/metrics | grep pg_listener_processed_messages_total
+# HELP pg_listener_processed_messages_total Total amount processed logical messages
+# TYPE pg_listener_processed_messages_total counter
+pg_listener_processed_messages_total 1
+```
 
 clean infra after all:
 ```bash
